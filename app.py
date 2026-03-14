@@ -2,8 +2,8 @@ from flask import Flask, request, jsonify
 import requests
 from datetime import datetime, timedelta, time
 
-TELEGRAM_TOKEN = "YOUR_TOKEN"
-CHAT_ID = "YOUR_CHAT_ID"
+TELEGRAM_TOKEN = "7964075094:AAEvEVE2MRke1CXgcoQkr6xqCNf_bzK94J4"
+CHAT_ID = "6599172354"
 
 COOLDOWN = 15
 
