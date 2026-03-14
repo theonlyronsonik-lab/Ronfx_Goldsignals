@@ -8,7 +8,7 @@ import telegram
 
 API_KEY = os.getenv("d143e9bb8b0c4d7487872fd699280bde")
 BOT_TOKEN = os.getenv("7964075094:AAEvEVE2MRke1CXgcoQkr6xqCNf_bzK94J4")
-CHAT_ID = os.getenv("6599172354")
+CHAT_ID = os.getenv("6599172354") 
 
 if BOT_TOKEN != "":
     bot = telegram.Bot(token=BOT_TOKEN)
