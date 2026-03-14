@@ -3,174 +3,266 @@ import pandas as pd
 import numpy as np
 import time
 import os
-from datetime import datetime
+import pytz
+from datetime import datetime, timedelta
 import telegram
 
-API_KEY = os.environ["d143e9bb8b0c4d7487872fd699280bde"]
-BOT_TOKEN = os.environ["7964075094:AAEvEVE2MRke1CXgcoQkr6xqCNf_bzK94J4"]
-CHAT_ID = os.environ["6599172354"]
+# ENV VARIABLES (SAFE)
+API_KEY = os.getenv("d143e9bb8b0c4d7487872fd699280bde")
+BOT_TOKEN = os.getenv("7964075094:AAEvEVE2MRke1CXgcoQkr6xqCNf_bzK94J4")
+CHAT_ID = os.getenv("6599172354")
 
 bot = telegram.Bot(token=BOT_TOKEN)
 
-SYMBOLS = ["XAU/USD", "XAG/USD"]
+SYMBOLS = ["XAU/USD","XAG/USD"]
 INTERVAL = "3min"
 
-COOLDOWN_MINUTES = 15
-last_alert_time = {}
+COOLDOWN = 15  # minutes
+last_signal_time = {}
 
-# ---------------- DATA ----------------
+signal_history = []
+
+# SESSION TIMES (UTC)
+ASIA = (2,10)
+LONDON = (7,16)
+NY = (13,22)
+
+# ---------- TELEGRAM ----------
+
+def send(msg):
+    try:
+        bot.send_message(chat_id=CHAT_ID,text=msg)
+    except:
+        print("Telegram error")
+
+# ---------- SESSION FILTER ----------
+
+def in_session():
+
+    utc = datetime.utcnow().hour
+
+    if ASIA[0] <= utc <= ASIA[1]:
+        return True
+
+    if LONDON[0] <= utc <= LONDON[1]:
+        return True
+
+    if NY[0] <= utc <= NY[1]:
+        return True
+
+    return False
+
+
+# ---------- DATA ----------
 
 def get_data(symbol):
 
-    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={INTERVAL}&outputsize=200&apikey={API_KEY}"
+    url=f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={INTERVAL}&outputsize=200&apikey={API_KEY}"
 
-    r = requests.get(url).json()
+    r=requests.get(url).json()
 
-    df = pd.DataFrame(r["values"])
+    df=pd.DataFrame(r["values"])
 
-    df = df.iloc[::-1]
+    df=df.iloc[::-1]
 
-    df["close"] = df["close"].astype(float)
-    df["high"] = df["high"].astype(float)
-    df["low"] = df["low"].astype(float)
+    for c in ["open","high","low","close"]:
+        df[c]=df[c].astype(float)
 
     return df
 
 
-# ---------------- RSI ----------------
+# ---------- RSI ----------
 
-def rsi(series, period=14):
+def rsi(series,period=14):
 
-    delta = series.diff()
+    delta=series.diff()
 
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
+    gain=delta.clip(lower=0)
+    loss=-delta.clip(upper=0)
 
-    avg_gain = gain.rolling(period).mean()
-    avg_loss = loss.rolling(period).mean()
+    avg_gain=gain.rolling(period).mean()
+    avg_loss=loss.rolling(period).mean()
 
-    rs = avg_gain / avg_loss
+    rs=avg_gain/avg_loss
 
-    rsi = 100 - (100 / (1 + rs))
-
-    return rsi
+    return 100-(100/(1+rs))
 
 
-# ---------------- PIVOTS ----------------
+# ---------- PIVOTS ----------
 
-def pivot_low(series, left=5, right=5):
+def pivot_low(series,left=5,right=5):
 
-    pivots = []
+    pivots=[]
 
-    for i in range(left, len(series)-right):
+    for i in range(left,len(series)-right):
 
-        window = series[i-left:i+right+1]
+        window=series[i-left:i+right+1]
 
-        if series[i] == min(window):
-
+        if series[i]==min(window):
             pivots.append(i)
 
     return pivots
 
 
-def pivot_high(series, left=5, right=5):
+def pivot_high(series,left=5,right=5):
 
-    pivots = []
+    pivots=[]
 
-    for i in range(left, len(series)-right):
+    for i in range(left,len(series)-right):
 
-        window = series[i-left:i+right+1]
+        window=series[i-left:i+right+1]
 
-        if series[i] == max(window):
-
+        if series[i]==max(window):
             pivots.append(i)
 
     return pivots
 
 
-# ---------------- TELEGRAM ----------------
+# ---------- DIVERGENCE ----------
 
-def send(msg):
+def bullish_divergence(df):
 
-    bot.send_message(chat_id=CHAT_ID, text=msg)
+    lows=pivot_low(df["low"])
+
+    if len(lows)<2:
+        return False,None
+
+    i1=lows[-2]
+    i2=lows[-1]
+
+    priceLL=df["low"][i2] < df["low"][i1]
+    rsiHL=df["rsi"][i2] > df["rsi"][i1]
+
+    if priceLL and rsiHL:
+        return True,i2
+
+    return False,None
 
 
-# ---------------- MAIN ----------------
+def bearish_divergence(df):
+
+    highs=pivot_high(df["high"])
+
+    if len(highs)<2:
+        return False,None
+
+    i1=highs[-2]
+    i2=highs[-1]
+
+    priceHH=df["high"][i2] > df["high"][i1]
+    rsiLH=df["rsi"][i2] < df["rsi"][i1]
+
+    if priceHH and rsiLH:
+        return True,i2
+
+    return False,None
+
+
+# ---------- DOUBLE SIGNAL LOGIC ----------
+
+signal_stack={}
+
+def double_signal(symbol,signal):
+
+    if symbol not in signal_stack:
+        signal_stack[symbol]=[]
+
+    signal_stack[symbol].append(signal)
+
+    if len(signal_stack[symbol])>2:
+        signal_stack[symbol].pop(0)
+
+    if signal_stack[symbol]==["BUY","BUY"]:
+        return "BUY"
+
+    if signal_stack[symbol]==["SELL","SELL"]:
+        return "SELL"
+
+    return None
+
+
+# ---------- MAIN LOOP ----------
 
 while True:
 
-    for symbol in SYMBOLS:
+    try:
 
-        df = get_data(symbol)
+        if not in_session():
+            time.sleep(60)
+            continue
 
-        df["rsi"] = rsi(df["close"])
+        for symbol in SYMBOLS:
 
-        lows = pivot_low(df["low"])
-        highs = pivot_high(df["high"])
+            df=get_data(symbol)
 
-        if len(lows) > 1:
+            df["rsi"]=rsi(df["close"])
 
-            i1 = lows[-2]
-            i2 = lows[-1]
+            bull,idx=bullish_divergence(df)
+            bear,idx2=bearish_divergence(df)
 
-            priceLL = df["low"][i2] < df["low"][i1]
-            rsiHL = df["rsi"][i2] > df["rsi"][i1]
+            now=datetime.utcnow()
 
-            if priceLL and rsiHL:
+            if symbol in last_signal_time:
 
-                now = datetime.utcnow()
+                if now-last_signal_time[symbol] < timedelta(minutes=COOLDOWN):
+                    continue
 
-                if symbol not in last_alert_time or (now - last_alert_time[symbol]).seconds > COOLDOWN_MINUTES*60:
+            if bull:
 
-                    entry = df["close"].iloc[-1]
-                    sl = df["low"][i2]
+                ds=double_signal(symbol,"BUY")
 
-                    msg = f"""
+                if ds=="BUY":
+
+                    entry=df["close"].iloc[-1]
+                    sl=df["low"][idx]
+
+                    msg=f"""
 🟢 BUY SIGNAL
 
-Symbol: {symbol}
+{symbol}
 
 Entry: {entry}
 SL: {sl}
 
-RSI Divergence detected
+RSI Bullish Divergence
 """
 
                     send(msg)
 
-                    last_alert_time[symbol] = now
+                    last_signal_time[symbol]=now
 
+                    signal_history.append(("BUY",symbol,entry))
 
-        if len(highs) > 1:
+            if bear:
 
-            i1 = highs[-2]
-            i2 = highs[-1]
+                ds=double_signal(symbol,"SELL")
 
-            priceHH = df["high"][i2] > df["high"][i1]
-            rsiLH = df["rsi"][i2] < df["rsi"][i1]
+                if ds=="SELL":
 
-            if priceHH and rsiLH:
+                    entry=df["close"].iloc[-1]
+                    sl=df["high"][idx2]
 
-                now = datetime.utcnow()
-
-                if symbol not in last_alert_time or (now - last_alert_time[symbol]).seconds > COOLDOWN_MINUTES*60:
-
-                    entry = df["close"].iloc[-1]
-                    sl = df["high"][i2]
-
-                    msg = f"""
+                    msg=f"""
 🔴 SELL SIGNAL
 
-Symbol: {symbol}
+{symbol}
 
 Entry: {entry}
 SL: {sl}
 
-RSI Divergence detected
+RSI Bearish Divergence
 """
 
                     send(msg)
 
-                    last_alert_time[symbol] = now
+                    last_signal_time[symbol]=now
 
-    time.sleep(180)
+                    signal_history.append(("SELL",symbol,entry))
+
+        time.sleep(180)
+
+    except Exception as e:
+
+        print("Error:",e)
+
+        time.sleep(60)
