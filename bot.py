@@ -3,57 +3,64 @@ import pandas as pd
 import numpy as np
 import time
 import os
-import pytz
 from datetime import datetime, timedelta
 import telegram
 
-# ENV VARIABLES (SAFE)
 API_KEY = os.getenv("d143e9bb8b0c4d7487872fd699280bde")
 BOT_TOKEN = os.getenv("7964075094:AAEvEVE2MRke1CXgcoQkr6xqCNf_bzK94J4")
 CHAT_ID = os.getenv("6599172354")
 
-bot = telegram.Bot(token=BOT_TOKEN)
+if BOT_TOKEN != "":
+    bot = telegram.Bot(token=BOT_TOKEN)
+else:
+    bot = None
 
 SYMBOLS = ["XAU/USD","XAG/USD"]
 INTERVAL = "3min"
 
-COOLDOWN = 15  # minutes
-last_signal_time = {}
+COOLDOWN_MINUTES = 15
 
+last_signal_time = {}
+signal_stack = {}
+active_trade = {}
 signal_history = []
 
-# SESSION TIMES (UTC)
 ASIA = (2,10)
 LONDON = (7,16)
 NY = (13,22)
 
-# ---------- TELEGRAM ----------
+# ---------------- TELEGRAM ----------------
 
 def send(msg):
+
+    if bot is None:
+        print(msg)
+        return
+
     try:
         bot.send_message(chat_id=CHAT_ID,text=msg)
-    except:
-        print("Telegram error")
+    except Exception as e:
+        print("Telegram error:",e)
 
-# ---------- SESSION FILTER ----------
+# ---------------- SESSION FILTER ----------------
 
-def in_session():
+def session_active():
 
-    utc = datetime.utcnow().hour
+    hour = datetime.utcnow().hour
 
-    if ASIA[0] <= utc <= ASIA[1]:
+    if ASIA[0] <= hour <= ASIA[1]:
         return True
 
-    if LONDON[0] <= utc <= LONDON[1]:
+    if LONDON[0] <= hour <= LONDON[1]:
         return True
 
-    if NY[0] <= utc <= NY[1]:
+    if NY[0] <= hour <= NY[1]:
         return True
 
     return False
 
 
-# ---------- DATA ----------
+# ---------------- DATA ----------------
 
 def get_data(symbol):
 
@@ -61,8 +68,10 @@ def get_data(symbol):
 
     r=requests.get(url).json()
 
-    df=pd.DataFrame(r["values"])
+    if "values" not in r:
+        return None
 
+    df=pd.DataFrame(r["values"])
     df=df.iloc[::-1]
 
     for c in ["open","high","low","close"]:
@@ -71,7 +80,7 @@ def get_data(symbol):
     return df
 
 
-# ---------- RSI ----------
+# ---------------- RSI ----------------
 
 def rsi(series,period=14):
 
@@ -88,7 +97,7 @@ def rsi(series,period=14):
     return 100-(100/(1+rs))
 
 
-# ---------- PIVOTS ----------
+# ---------------- PIVOTS ----------------
 
 def pivot_low(series,left=5,right=5):
 
@@ -96,9 +105,7 @@ def pivot_low(series,left=5,right=5):
 
     for i in range(left,len(series)-right):
 
-        window=series[i-left:i+right+1]
-
-        if series[i]==min(window):
+        if series[i]==min(series[i-left:i+right+1]):
             pivots.append(i)
 
     return pivots
@@ -110,17 +117,15 @@ def pivot_high(series,left=5,right=5):
 
     for i in range(left,len(series)-right):
 
-        window=series[i-left:i+right+1]
-
-        if series[i]==max(window):
+        if series[i]==max(series[i-left:i+right+1]):
             pivots.append(i)
 
     return pivots
 
 
-# ---------- DIVERGENCE ----------
+# ---------------- DIVERGENCE ----------------
 
-def bullish_divergence(df):
+def bullish_div(df):
 
     lows=pivot_low(df["low"])
 
@@ -139,7 +144,7 @@ def bullish_divergence(df):
     return False,None
 
 
-def bearish_divergence(df):
+def bearish_div(df):
 
     highs=pivot_high(df["high"])
 
@@ -158,11 +163,9 @@ def bearish_divergence(df):
     return False,None
 
 
-# ---------- DOUBLE SIGNAL LOGIC ----------
+# ---------------- DOUBLE SIGNAL ----------------
 
-signal_stack={}
-
-def double_signal(symbol,signal):
+def double_confirm(symbol,signal):
 
     if symbol not in signal_stack:
         signal_stack[symbol]=[]
@@ -181,13 +184,31 @@ def double_signal(symbol,signal):
     return None
 
 
-# ---------- MAIN LOOP ----------
+# ---------------- TAKE PROFIT ----------------
+
+def check_tp(symbol,signal):
+
+    if symbol not in active_trade:
+        return
+
+    trade=active_trade[symbol]
+
+    if signal=="BUY" and trade["type"]=="SELL":
+        send(f"✅ TP HIT {symbol} (SELL closed)")
+        del active_trade[symbol]
+
+    if signal=="SELL" and trade["type"]=="BUY":
+        send(f"✅ TP HIT {symbol} (BUY closed)")
+        del active_trade[symbol]
+
+
+# ---------------- MAIN LOOP ----------------
 
 while True:
 
     try:
 
-        if not in_session():
+        if not session_active():
             time.sleep(60)
             continue
 
@@ -195,74 +216,72 @@ while True:
 
             df=get_data(symbol)
 
+            if df is None:
+                continue
+
             df["rsi"]=rsi(df["close"])
 
-            bull,idx=bullish_divergence(df)
-            bear,idx2=bearish_divergence(df)
+            bull,idx=bullish_div(df)
+            bear,idx2=bearish_div(df)
 
             now=datetime.utcnow()
 
             if symbol in last_signal_time:
 
-                if now-last_signal_time[symbol] < timedelta(minutes=COOLDOWN):
+                if now-last_signal_time[symbol] < timedelta(minutes=COOLDOWN_MINUTES):
                     continue
 
             if bull:
 
-                ds=double_signal(symbol,"BUY")
+                check_tp(symbol,"BUY")
+
+                ds=double_confirm(symbol,"BUY")
 
                 if ds=="BUY":
 
                     entry=df["close"].iloc[-1]
                     sl=df["low"][idx]
 
-                    msg=f"""
+                    send(f"""
 🟢 BUY SIGNAL
-
 {symbol}
 
 Entry: {entry}
 SL: {sl}
+""")
 
-RSI Bullish Divergence
-"""
-
-                    send(msg)
+                    active_trade[symbol]={"type":"BUY","entry":entry}
 
                     last_signal_time[symbol]=now
 
-                    signal_history.append(("BUY",symbol,entry))
 
             if bear:
 
-                ds=double_signal(symbol,"SELL")
+                check_tp(symbol,"SELL")
+
+                ds=double_confirm(symbol,"SELL")
 
                 if ds=="SELL":
 
                     entry=df["close"].iloc[-1]
                     sl=df["high"][idx2]
 
-                    msg=f"""
+                    send(f"""
 🔴 SELL SIGNAL
-
 {symbol}
 
 Entry: {entry}
 SL: {sl}
+""")
 
-RSI Bearish Divergence
-"""
-
-                    send(msg)
+                    active_trade[symbol]={"type":"SELL","entry":entry}
 
                     last_signal_time[symbol]=now
-
-                    signal_history.append(("SELL",symbol,entry))
 
         time.sleep(180)
 
     except Exception as e:
 
-        print("Error:",e)
+        print("Runtime error:",e)
 
         time.sleep(60)
