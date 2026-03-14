@@ -8,7 +8,7 @@ import telegram
 
 API_KEY = os.environ["d143e9bb8b0c4d7487872fd699280bde"]
 BOT_TOKEN = os.environ["7964075094:AAEvEVE2MRke1CXgcoQkr6xqCNf_bzK94J4"]
-CHAT_ID = os.environ["CHAT_ID"]
+CHAT_ID = os.environ["6599172354"]
 
 bot = telegram.Bot(token=BOT_TOKEN)
 
