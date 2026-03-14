@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 import telegram
 
-API_KEY = os.environ["TWELVE_API_KEY"]
+API_KEY = os.environ["d143e9bb8b0c4d7487872fd699280bde"]
 BOT_TOKEN = os.environ["TELEGRAM_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 
