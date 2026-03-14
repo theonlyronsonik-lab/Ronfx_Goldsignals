@@ -1,14 +1,15 @@
-# file: rsi_divergence_bot.py
+# rsi_divergence_bot.py
 import requests
 import pandas as pd
 import time
 import numpy as np
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 import telegram
+import os
 
-# -------------------- CONFIG --------------------
-API_KEY = "YOUR_TWELVE_DATA_API_KEY"
-SYMBOLS = ["XAU/USD", "XAG/USD"]  # Gold & Silver
+# -------------------- CONFIG (from env) --------------------
+API_KEY = os.getenv("d143e9bb8b0c4d7487872fd699280bde")
+SYMBOLS = ["XAU/USD", "XAG/USD"]
 INTERVAL = "3min"
 RSI_PERIOD = 14
 LB_L = 5
@@ -17,8 +18,8 @@ RANGE_LOWER = 5
 RANGE_UPPER = 60
 COOLDOWN_MINUTES = 15
 
-TELEGRAM_TOKEN = "7964075094:AAEvEVE2MRke1CXgcoQkr6xqCNf_bzK94J4"
-CHAT_ID = 6599172354
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = int(os.getenv("TELEGRAM_CHAT_ID"))
 
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 
@@ -71,9 +72,9 @@ def send_telegram(message):
         print("Telegram send error:", e)
 
 # -------------------- MAIN LOOP --------------------
-last_signal = {"XAU/USD": None, "XAG/USD": None}
-last_signal_time = {"XAU/USD": None, "XAG/USD": None}
-current_trade = {"XAU/USD": None, "XAG/USD": None}
+last_signal = {symbol: None for symbol in SYMBOLS}
+last_signal_time = {symbol: None for symbol in SYMBOLS}
+current_trade = {symbol: None for symbol in SYMBOLS}
 
 while True:
     for symbol in SYMBOLS:
@@ -85,66 +86,21 @@ while True:
         df['pl'] = pivot_low(df, LB_L, LB_R)
         df['ph'] = pivot_high(df, LB_L, LB_R)
 
-        bars_since_last_pl = df['pl'][::-1].cumsum()  # rough bar count
-        bars_since_last_ph = df['ph'][::-1].cumsum()
-
         last_idx = len(df)-1
+        now = datetime.utcnow()
+        cooldown = last_signal_time[symbol] and (now - last_signal_time[symbol]).total_seconds() < COOLDOWN_MINUTES*60
 
         # ---------------- SIGNAL LOGIC ----------------
-        # Bull signal
         if last_idx >= LB_R+1:
             # Regular Bullish
-            inrange_pl = _in_range(1, RANGE_LOWER, RANGE_UPPER)
-            oscHL = df['rsi'].iloc[last_idx-LB_R] > df['rsi'].iloc[:last_idx-LB_R].max()
-            priceLL = df['low'].iloc[last_idx-LB_R] < df['low'].iloc[:last_idx-LB_R].min()
-            bull_signal = df['pl'].iloc[last_idx] and oscHL and priceLL
-
+            bull_signal = df['pl'].iloc[last_idx] and df['rsi'].iloc[last_idx-LB_R] > df['rsi'].iloc[:last_idx-LB_R].max() and df['low'].iloc[last_idx-LB_R] < df['low'].iloc[:last_idx-LB_R].min()
             # Regular Bearish
-            inrange_ph = _in_range(1, RANGE_LOWER, RANGE_UPPER)
-            oscLH = df['rsi'].iloc[last_idx-LB_R] < df['rsi'].iloc[:last_idx-LB_R].min()
-            priceHH = df['high'].iloc[last_idx-LB_R] > df['high'].iloc[:last_idx-LB_R].max()
-            bear_signal = df['ph'].iloc[last_idx] and oscLH and priceHH
-
-            now = datetime.utcnow()
-            cooldown = last_signal_time[symbol] is not None and (now - last_signal_time[symbol]).total_seconds() < COOLDOWN_MINUTES*60
+            bear_signal = df['ph'].iloc[last_idx] and df['rsi'].iloc[last_idx-LB_R] < df['rsi'].iloc[:last_idx-LB_R].min() and df['high'].iloc[last_idx-LB_R] > df['high'].iloc[:last_idx-LB_R].max()
 
             # Double signal entry
             if bull_signal and last_signal[symbol] == "BULL" and not cooldown and current_trade[symbol] is None:
                 entry_price = df['close'].iloc[last_idx]
                 sl = df['low'].iloc[last_idx-LB_R]
                 current_trade[symbol] = {"type":"BUY","entry":entry_price,"sl":sl,"tp":None}
-                message = f"{symbol} → BUY Signal\nEntry: {entry_price}\nSL: {sl}\nCooldown: {COOLDOWN_MINUTES}min"
-                send_telegram(message)
+                send_telegram(f"{symbol} → BUY Signal\nEntry: {entry_price}\nSL: {sl}\nCooldown: {COOLDOWN_MINUTES}min")
                 last_signal_time[symbol] = now
-
-            if bear_signal and last_signal[symbol] == "BEAR" and not cooldown and current_trade[symbol] is None:
-                entry_price = df['close'].iloc[last_idx]
-                sl = df['high'].iloc[last_idx-LB_R]
-                current_trade[symbol] = {"type":"SELL","entry":entry_price,"sl":sl,"tp":None}
-                message = f"{symbol} → SELL Signal\nEntry: {entry_price}\nSL: {sl}\nCooldown: {COOLDOWN_MINUTES}min"
-                send_telegram(message)
-                last_signal_time[symbol] = now
-
-            # Close trades (TP)
-            if current_trade[symbol]:
-                trade = current_trade[symbol]
-                if trade["type"] == "BUY" and bear_signal:
-                    trade["tp"] = df['close'].iloc[last_idx]
-                    message = f"{symbol} → BUY Closed (TP)\nEntry: {trade['entry']}\nSL: {trade['sl']}\nTP: {trade['tp']}"
-                    send_telegram(message)
-                    current_trade[symbol] = None
-                    last_signal_time[symbol] = now
-                if trade["type"] == "SELL" and bull_signal:
-                    trade["tp"] = df['close'].iloc[last_idx]
-                    message = f"{symbol} → SELL Closed (TP)\nEntry: {trade['entry']}\nSL: {trade['sl']}\nTP: {trade['tp']}"
-                    send_telegram(message)
-                    current_trade[symbol] = None
-                    last_signal_time[symbol] = now
-
-            # Update last signal
-            if bull_signal:
-                last_signal[symbol] = "BULL"
-            if bear_signal:
-                last_signal[symbol] = "BEAR"
-
-    time.sleep(180)  # wait 3 minutes for next candle
