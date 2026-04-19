@@ -1,14 +1,14 @@
 import os
 
 # ── SYMBOLS ────────────────────────────────────────────────
-SYMBOLS = ["XAU/USD", "GBP/USD", "GBP/JPY", "S&P 500"]
+SYMBOLS = ["XAU/USD", "GBP/USD", "GBP/JPY", "AUD/USD"]
 
 # ── TIMEFRAMES ────────────────────────────────────────────
-HTF = "5min"    # Higher Timeframe — structure & bias
-LTF = "1min"    # Lower Timeframe — entry detection
+HTF = "1H"    # Higher Timeframe — structure & bias
+LTF = "5min"    # Lower Timeframe — entry detection
 
 # ── LOOP ──────────────────────────────────────────────────
-LOOP_DELAY = 60   # seconds between full scan cycles
+LOOP_DELAY = 180   # seconds between full scan cycles
 
 # ── API KEYS ──────────────────────────────────────────────
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "")
