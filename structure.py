@@ -93,8 +93,4 @@ def check_bos(df, state):
         print("BOS UP — recalculating HTF bias")
         return True
 
-    # Quietly extend range high if price makes new highs (within trend)
-    if last_close > state.htf_range_high:
-        state.htf_range_high = last_close
-
     return False
