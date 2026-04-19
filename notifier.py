@@ -72,7 +72,3 @@ def send_entry_alert(symbol, bias, entry, sl, tp1, tp2, narrative, sweep_price, 
         f"📖 <b>Narrative</b>\n{narrative}"
     )
 
-
-def send_no_setup(symbol):
-    """Silent — just a console print, not a Telegram message, to avoid noise."""
-    print(f"  No setup found for {symbol}")

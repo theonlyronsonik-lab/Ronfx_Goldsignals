@@ -11,7 +11,7 @@ from structure import determine_bias, check_bos
 from entry   import find_inducement_setup
 from sessions import in_trading_session
 from state   import create_states
-from notifier import send_startup, send_htf_update, send_entry_alert, send_no_setup
+from notifier import send_startup, send_htf_update, send_entry_alert
 
 
 def run():
@@ -44,15 +44,15 @@ def run():
                 state.trade_taken      = False      # new structure resets trade gate
                 state.last_entry_zone  = None
                 print(f"  Bias updated: {bias} | {series}× series | Range {rng_low:.5f}–{rng_high:.5f}")
-
-            send_htf_update(
-                symbol, HTF,
-                state.htf_bias, state.htf_series_count,
-                state.htf_range_low or 0, state.htf_range_high or 0,
-                session_active, session_name,
-            )
+                send_htf_update(
+                    symbol, HTF,
+                    state.htf_bias, state.htf_series_count,
+                    state.htf_range_low or 0, state.htf_range_high or 0,
+                    session_active, session_name,
+                )
 
             # ── 2. GUARD RAILS ────────────────────────────────────────────────
+
             if state.htf_bias == "RANGE":
                 print(f"  HTF ranging — no trade on {symbol}")
                 continue
@@ -99,7 +99,7 @@ def run():
                 state.last_entry_zone = (sl, entry)
                 print(f"  Entry alert sent: {entry:.5f} | SL {sl:.5f} | TP1 {tp1:.5f} | TP2 {tp2:.5f}")
             else:
-                send_no_setup(symbol)
+                print(f"  No setup found for {symbol}")
 
         print(f"\nSleeping {LOOP_DELAY}s...")
         time.sleep(LOOP_DELAY)
