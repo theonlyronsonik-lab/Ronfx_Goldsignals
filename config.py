@@ -4,7 +4,7 @@ import os
 SYMBOLS = ["XAU/USD", "GBP/USD", "GBP/JPY", "AUD/USD"]
 
 # ── TIMEFRAMES ────────────────────────────────────────────
-HTF = "1H"    # Higher Timeframe — structure & bias
+HTF = "1h"    # Higher Timeframe — structure & bias
 LTF = "5min"    # Lower Timeframe — entry detection
 
 # ── LOOP ──────────────────────────────────────────────────
