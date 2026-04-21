@@ -8,9 +8,11 @@ class BotState:
         self.htf_range_high   = None    # top of current HTF leg
         self.htf_range_low    = None    # bottom of current HTF leg
 
-        # Trade gate — reset when new BOS forms
-        self.trade_taken      = False
-        self.last_entry_zone  = None    # (zone_low, zone_high) last alerted zone
+        # Entry deduplication — reset only when a new HTF structure break occurs.
+        # Stores the (entry_price, sl_price) of the last alerted LTF setup so that
+        # the same setup is never alerted twice within the same HTF structure cycle.
+        # Set to None on BOS so the next qualifying setup fires a fresh alert.
+        self.last_alerted_setup = None  # (entry_price, sl_price) | None
 
 
 def create_states(symbols):
