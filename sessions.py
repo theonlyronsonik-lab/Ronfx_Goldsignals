@@ -11,6 +11,6 @@ def in_trading_session():
 
     if 6 <= hour <= 11:
         return True, "London"
-    if 11 <= hour <= 16:
+    if 11 <= hour <= 17:
         return True, "New York"
     return False, "Off-session"
