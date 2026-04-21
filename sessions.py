@@ -9,8 +9,8 @@ def in_trading_session():
     """
     hour = datetime.now(timezone.utc).hour
 
-    if 7 <= hour <= 11:
+    if 6 <= hour <= 11:
         return True, "London"
-    if 12 <= hour <= 16:
+    if 11 <= hour <= 16:
         return True, "New York"
     return False, "Off-session"
