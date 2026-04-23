@@ -54,7 +54,11 @@ def send_htf_update(symbol, timeframe, bias, series_count, htf_low, htf_high, se
     )
 
 
-def send_entry_alert(symbol, bias, entry, sl, tp1, tp2, narrative, sweep_price, session_name):
+def send_entry_alert(
+    symbol, bias, entry, sl, tp1, tp2,
+    narrative, sweep_price, session_name,
+    htf_zone_high, htf_zone_low,
+):
     direction = "BUY  🟢" if bias == "BULLISH" else "SELL 🔴"
     risk      = abs(entry - sl)
     rr1       = round(abs(tp1 - entry) / risk, 2) if risk > 0 else "—"
@@ -63,12 +67,15 @@ def send_entry_alert(symbol, bias, entry, sl, tp1, tp2, narrative, sweep_price, 
     _send(
         f"💹 <b>ENTRY ALERT — {symbol}</b>\n"
         f"Direction : <b>{direction}</b>\n"
-        f"Session   : {session_name}\n"
-        f"Sweep at  : {sweep_price:.5f}\n\n"
-        f"📌 Entry  : {entry:.5f}\n"
-        f"🛡  SL    : {sl:.5f}\n"
-        f"🎯 TP1   : {tp1:.5f}   (R:R  {rr1}:1)\n"
-        f"🚀 TP2   : {tp2:.5f}   (R:R  {rr2}:1)\n\n"
+        f"Session   : {session_name}\n\n"
+        f"🏛 <b>HTF Inducement Zone</b> (gate confirmed)\n"
+        f"   Zone   : {htf_zone_low:.5f} – {htf_zone_high:.5f}\n"
+        f"   Sweep  : {sweep_price:.5f}\n\n"
+        f"📍 <b>LTF Entry</b>\n"
+        f"   📌 Entry : {entry:.5f}\n"
+        f"   🛡  SL   : {sl:.5f}\n"
+        f"   🎯 TP1  : {tp1:.5f}   (R:R  {rr1}:1)\n"
+        f"   🚀 TP2  : {tp2:.5f}   (R:R  {rr2}:1)\n\n"
         f"📖 <b>Narrative</b>\n{narrative}"
     )
 
