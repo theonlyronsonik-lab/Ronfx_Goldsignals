@@ -8,6 +8,17 @@ class BotState:
         self.htf_range_high   = None    # top of current HTF leg
         self.htf_range_low    = None    # bottom of current HTF leg
 
+        # HTF inducement gate — updated every scan cycle.
+        # htf_inducement holds the most recent complete HTF inducement zone as a
+        # tuple of (zone_high, zone_low, sweep_price, narrative), or None when no
+        # complete zone has been detected yet.
+        # htf_inducement_complete is True only when htf_inducement is not None,
+        # meaning the full HTF sequence (displacement → sweep → recovery →
+        # inducement candle → continuation) has finished forming.  LTF entries
+        # are only considered when this flag is True.
+        self.htf_inducement          = None   # (zone_high, zone_low, sweep_price, narrative) | None
+        self.htf_inducement_complete = False  # True when HTF zone is fully formed
+
         # Entry deduplication — reset only when a new HTF structure break occurs.
         # Stores the (entry_price, sl_price) of the last alerted LTF setup so that
         # the same setup is never alerted twice within the same HTF structure cycle.

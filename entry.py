@@ -1,8 +1,16 @@
 """
-entry.py — LTF inducement + liquidity sweep entry detection.
+entry.py — HTF inducement gate + LTF inducement entry detection.
 
-Full bullish sequence the bot looks for on the 1-min chart:
+HTF inducement gate (find_htf_inducement):
+  Detects a *complete* inducement zone on the higher timeframe.  A zone is
+  complete when the full sequence (displacement → sweep → recovery →
+  inducement candle → continuation away from zone) has finished forming.
+  The current price does NOT need to be retesting the zone — we only need
+  to confirm the zone exists and price has already left it.  This completed
+  zone is then used as a gate: LTF entries are only considered when a valid
+  HTF inducement zone is in place.
 
+LTF entry sequence (find_inducement_setup):
   1. Initial bullish displacement (strong impulsive candles).
   2. First pullback  — price forms a short reaction level, attracting early buyers.
   3. Liquidity sweep — price drops below that reaction level, taking out early
@@ -31,6 +39,230 @@ def _is_displacement(candle, avg_body):
         return False
     wick_ratio = (rng - body) / rng
     return body >= avg_body * DISPLACEMENT_FACTOR and wick_ratio <= 0.45
+
+
+def find_htf_inducement(df, htf_bias):
+    """
+    Scan the HTF DataFrame for a *complete* inducement zone.
+
+    A zone is complete when:
+      1. A displacement candle exists in the direction of bias.
+      2. A liquidity sweep of a prior reaction level has occurred.
+      3. Price recovered from the sweep with an impulse.
+      4. An inducement candle (counter-trend) formed during the recovery.
+      5. Price has already moved away from the zone (continuation confirmed).
+
+    Crucially, the current price does NOT need to be retesting the zone.
+    We only verify the zone is fully formed so it can act as a gate for LTF
+    entries.  The LTF entry logic handles the actual retest confirmation.
+
+    Returns:
+        (zone_high, zone_low, sweep_price, narrative)  when a complete zone exists.
+        None  when no complete HTF inducement zone is found.
+    """
+    n = len(df)
+    if n < 20:
+        return None
+
+    df = df.copy().reset_index(drop=True)
+    df["body"] = (df["close"] - df["open"]).abs()
+    avg_body = df["body"].mean()
+
+    if htf_bias == "BULLISH":
+        return _htf_bullish_inducement(df, n, avg_body)
+    if htf_bias == "BEARISH":
+        return _htf_bearish_inducement(df, n, avg_body)
+    return None
+
+
+def _htf_bullish_inducement(df, n, avg_body):
+    """Find the most recent complete bullish HTF inducement zone."""
+    # Search the last INDUCEMENT_SEARCH candles, newest sweep first
+    search_from = max(10, n - INDUCEMENT_SEARCH)
+
+    for sweep_idx in range(n - 3, search_from, -1):
+        candle = df.iloc[sweep_idx]
+
+        # ── Step 2: liquidity sweep of a prior reaction low ──────────────────
+        lb = df.iloc[max(0, sweep_idx - 15): sweep_idx]
+        if len(lb) < 4:
+            continue
+
+        reaction_low = float(lb["low"].min())
+        c_low   = float(candle["low"])
+        c_close = float(candle["close"])
+
+        swept     = c_low < reaction_low
+        recovered = c_close > reaction_low
+        if not swept:
+            continue
+        if not recovered and sweep_idx + 1 < n:
+            recovered = float(df["close"].iloc[sweep_idx + 1]) > reaction_low
+        if not recovered:
+            continue
+
+        # ── Step 1: bullish displacement before the pullback ─────────────────
+        pre_window = df.iloc[max(0, sweep_idx - 25): max(0, sweep_idx - 5)]
+        has_impulse = any(
+            _is_displacement(pre_window.iloc[i], avg_body) and
+            float(pre_window.iloc[i]["close"]) > float(pre_window.iloc[i]["open"])
+            for i in range(len(pre_window))
+        )
+        if not has_impulse:
+            continue
+
+        # ── Steps 3-4: find the inducement candle after the sweep ────────────
+        post = df.iloc[sweep_idx + 1: sweep_idx + 25]
+        if len(post) < 3:
+            continue
+
+        inducement  = None
+        ind_abs_idx = None
+
+        for j in range(1, len(post) - 2):
+            pc   = post.iloc[j]
+            prev = post.iloc[j - 1]
+
+            # Inducement: bearish candle inside an upward recovery
+            if float(pc["close"]) >= float(pc["open"]):
+                continue                                    # must be bearish
+            if float(prev["close"]) <= float(prev["open"]):
+                continue                                    # prev must be bullish
+
+            # Price must continue upward after the inducement candle
+            after = post.iloc[j + 1: j + 4]
+            if len(after) < 1:
+                continue
+            continued_up = float(after["high"].max()) > float(pc["high"])
+            if not continued_up:
+                continue
+
+            inducement = {
+                "high": float(pc["high"]),
+                "low":  float(pc["low"]),
+            }
+            ind_abs_idx = sweep_idx + 1 + j
+            break
+
+        if inducement is None:
+            continue
+
+        zone_high = inducement["high"]
+        zone_low  = inducement["low"]
+
+        # ── Step 5: price has moved away from the zone (continuation) ────────
+        post_ind = df.iloc[ind_abs_idx + 1:]
+        if len(post_ind) < 1:
+            continue
+        if float(post_ind["high"].max()) <= zone_high:
+            continue                                        # zone never left behind
+
+        sweep_price = float(df["low"].iloc[sweep_idx])
+        narrative = (
+            f"HTF bullish inducement zone confirmed: "
+            f"{zone_low:.5f}–{zone_high:.5f}. "
+            f"Liquidity swept down to {sweep_price:.5f} before recovery. "
+            f"Sellers were trapped in the zone during the recovery impulse. "
+            f"Price has since moved above the zone — structure is complete."
+        )
+
+        return (zone_high, zone_low, sweep_price, narrative)
+
+    return None
+
+
+def _htf_bearish_inducement(df, n, avg_body):
+    """Find the most recent complete bearish HTF inducement zone."""
+    search_from = max(10, n - INDUCEMENT_SEARCH)
+
+    for sweep_idx in range(n - 3, search_from, -1):
+        candle = df.iloc[sweep_idx]
+
+        # ── Step 2: liquidity sweep of a prior reaction high ─────────────────
+        lb = df.iloc[max(0, sweep_idx - 15): sweep_idx]
+        if len(lb) < 4:
+            continue
+
+        reaction_high = float(lb["high"].max())
+        c_high  = float(candle["high"])
+        c_close = float(candle["close"])
+
+        swept     = c_high > reaction_high
+        recovered = c_close < reaction_high
+        if not swept:
+            continue
+        if not recovered and sweep_idx + 1 < n:
+            recovered = float(df["close"].iloc[sweep_idx + 1]) < reaction_high
+        if not recovered:
+            continue
+
+        # ── Step 1: bearish displacement before the pullback ─────────────────
+        pre_window = df.iloc[max(0, sweep_idx - 25): max(0, sweep_idx - 5)]
+        has_impulse = any(
+            _is_displacement(pre_window.iloc[i], avg_body) and
+            float(pre_window.iloc[i]["close"]) < float(pre_window.iloc[i]["open"])
+            for i in range(len(pre_window))
+        )
+        if not has_impulse:
+            continue
+
+        # ── Steps 3-4: find the inducement candle after the sweep ────────────
+        post = df.iloc[sweep_idx + 1: sweep_idx + 25]
+        if len(post) < 3:
+            continue
+
+        inducement  = None
+        ind_abs_idx = None
+
+        for j in range(1, len(post) - 2):
+            pc   = post.iloc[j]
+            prev = post.iloc[j - 1]
+
+            # Inducement: bullish candle during bearish recovery
+            if float(pc["close"]) <= float(pc["open"]):
+                continue
+            if float(prev["close"]) >= float(prev["open"]):
+                continue
+
+            after = post.iloc[j + 1: j + 4]
+            if len(after) < 1:
+                continue
+            continued_down = float(after["low"].min()) < float(pc["low"])
+            if not continued_down:
+                continue
+
+            inducement = {
+                "high": float(pc["high"]),
+                "low":  float(pc["low"]),
+            }
+            ind_abs_idx = sweep_idx + 1 + j
+            break
+
+        if inducement is None:
+            continue
+
+        zone_high = inducement["high"]
+        zone_low  = inducement["low"]
+
+        # ── Step 5: price has moved away from the zone (continuation) ────────
+        post_ind = df.iloc[ind_abs_idx + 1:]
+        if len(post_ind) < 1:
+            continue
+        if float(post_ind["low"].min()) >= zone_low:
+            continue                                        # zone never left behind
+
+        sweep_price = float(df["high"].iloc[sweep_idx])
+        narrative = (
+            f"HTF bearish inducement zone confirmed: "
+            f"{zone_low:.5f}–{zone_high:.5f}. "
+            f"Liquidity swept up to {sweep_price:.5f} before recovery. "
+            f"Buyers were trapped in the zone during the recovery impulse. "
+            f"Price has since moved below the zone — structure is complete."
+        )
+
+        return (zone_high, zone_low, sweep_price, narrative)
+
+    return None
 
 
 def find_inducement_setup(df, htf_bias, htf_range_low, htf_range_high):
