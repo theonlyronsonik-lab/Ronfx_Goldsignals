@@ -3,8 +3,11 @@ main.py — Ron_Market Scanner
 Orchestrates HTF bias + LTF inducement entry detection for each symbol.
 
 Scanning strategy:
-  - HTF and LTF are scanned continuously, 24/7, regardless of session.
-  - Setups are tracked in state as they form (with timestamps).
+  - Scanning is restricted to London (06:00–11:00 UTC) and New York
+    (11:00–17:00 UTC) trading sessions only.  Off-session the bot sleeps
+    without making any API calls, keeping usage well within rate limits.
+  - When a session is active, HTF and LTF are scanned every cycle and
+    setups are tracked in state as they form (with timestamps).
   - A signal is only sent when ALL four conditions are simultaneously true:
       1. HTF inducement zone is complete.
       2. LTF entry setup is found and valid.
@@ -64,6 +67,16 @@ def run():
               f"Session: {session_name} ({'active' if session_active else 'off'})")
         print(f"{'='*50}")
 
+        # ── SESSION GATE ──────────────────────────────────────────────────────
+        # Skip all API calls when outside London / New York sessions.
+        # This is the primary rate-limit guard: no network requests are made
+        # off-session.  The bot simply sleeps and re-checks next cycle.
+        if not session_active:
+            print(f"  Off-session ({session_name}) — sleeping, no API calls made")
+            print(f"\nSleeping {LOOP_DELAY}s...")
+            time.sleep(LOOP_DELAY)
+            continue
+
         for symbol in SYMBOLS:
             print(f"\n--- {symbol} ---")
             state = states[symbol]
@@ -103,7 +116,7 @@ def run():
                 print(f"  HTF ranging — no trade on {symbol}")
                 continue
 
-            # ── 3. HTF INDUCEMENT SCAN (always, even off-session) ─────────────
+            # ── 3. HTF INDUCEMENT SCAN ────────────────────────────────────────
             # Re-scan every cycle so the gate updates if a newer zone forms.
             # Timestamp is only set the first time a zone is detected; it is
             # preserved across cycles so we know when the zone originally formed.
@@ -124,7 +137,7 @@ def run():
                 state.htf_inducement_complete = False
                 print(f"  HTF inducement not yet complete — tracking")
 
-            # ── 4. LTF DATA & SETUP SCAN (always, even off-session) ───────────
+            # ── 4. LTF DATA & SETUP SCAN ─────────────────────────────────────
             ltf_df = get_candles(symbol, LTF, limit=100)
             if ltf_df.empty:
                 print(f"  No LTF data — skipping {symbol}")
