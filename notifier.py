@@ -58,24 +58,44 @@ def send_entry_alert(
     symbol, bias, entry, sl, tp1, tp2,
     narrative, sweep_price, session_name,
     htf_zone_high, htf_zone_low,
+    htf_narrative=None,
+    htf_found_at=None,
+    ltf_found_at=None,
+    signal_sent_at=None,
 ):
     direction = "BUY  🟢" if bias == "BULLISH" else "SELL 🔴"
     risk      = abs(entry - sl)
     rr1       = round(abs(tp1 - entry) / risk, 2) if risk > 0 else "—"
     rr2       = round(abs(tp2 - entry) / risk, 2) if risk > 0 else "—"
 
+    # Format optional timestamps
+    def _fmt(dt):
+        return dt.strftime("%Y-%m-%d %H:%M:%S UTC") if dt is not None else "—"
+
+    htf_ts     = _fmt(htf_found_at)
+    ltf_ts     = _fmt(ltf_found_at)
+    signal_ts  = _fmt(signal_sent_at)
+
+    # Build HTF narrative block
+    htf_narr_block = f"\n   📝 {htf_narrative}" if htf_narrative else ""
+
     _send(
         f"💹 <b>ENTRY ALERT — {symbol}</b>\n"
-        f"Direction : <b>{direction}</b>\n"
-        f"Session   : {session_name}\n\n"
-        f"🏛 <b>HTF Inducement Zone</b> (gate confirmed)\n"
-        f"   Zone   : {htf_zone_low:.5f} – {htf_zone_high:.5f}\n"
-        f"   Sweep  : {sweep_price:.5f}\n\n"
-        f"📍 <b>LTF Entry</b>\n"
+        f"Direction  : <b>{direction}</b>\n"
+        f"Session    : ✅ {session_name} (signal trigger)\n"
+        f"Signal at  : {signal_ts}\n\n"
+        f"🏛 <b>HTF Inducement Zone</b> (confirmed ✅)\n"
+        f"   Zone    : {htf_zone_low:.5f} – {htf_zone_high:.5f}\n"
+        f"   Sweep   : {sweep_price:.5f}\n"
+        f"   Found   : {htf_ts}"
+        f"{htf_narr_block}\n\n"
+        f"📍 <b>LTF Entry Setup</b> (confirmed ✅)\n"
+        f"   Found   : {ltf_ts}\n"
         f"   📌 Entry : {entry:.5f}\n"
         f"   🛡  SL   : {sl:.5f}\n"
         f"   🎯 TP1  : {tp1:.5f}   (R:R  {rr1}:1)\n"
         f"   🚀 TP2  : {tp2:.5f}   (R:R  {rr2}:1)\n\n"
-        f"📖 <b>Narrative</b>\n{narrative}"
+        f"🔗 <b>Alignment</b>: HTF zone ∩ LTF entry — structures correlated ✅\n\n"
+        f"📖 <b>LTF Narrative</b>\n{narrative}"
     )
 
